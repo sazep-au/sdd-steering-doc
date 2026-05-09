@@ -171,7 +171,7 @@ router.get('/resource/:id',
 
 ## Logging Standards
 
-- Use `@sazep/logger` package for all logging
+- Use `@sazep/sazep-logger` package for all logging
 - Log levels: error, warn, info, debug
 - Include context in log messages
 - Never log sensitive data (passwords, tokens, PII)
