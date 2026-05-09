@@ -79,7 +79,7 @@ All strict TypeScript compiler options are enabled:
 ### Test Framework
 - **Framework**: Jest with ts-jest
 - **Coverage Requirements**:
-  - Branches: 70%
+  - Branches: 80%
   - Statements: 80%
   - Lines: 80%
   - Functions: 80%
@@ -202,6 +202,30 @@ router.get('/resource/:id',
 - Husky runs pre-commit hooks
 - Linting and formatting checks run automatically
 
+## API Documentation Route
+
+When the `ENABLE_DOCS` environment variable is set to `"true"`, mount a `/docs` route to host the API documentation (e.g., Swagger UI). This keeps documentation accessible in development and staging environments while disabled in production by default.
+
+### Implementation Pattern
+```typescript
+import express from 'express';
+import swaggerUi from 'swagger-ui-express';
+import swaggerDocument from '../docs/openapi.json';
+
+const app = express();
+
+if (process.env.ENABLE_DOCS === 'true') {
+  app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+}
+```
+
+### Guidelines
+- Only mount the docs route when `ENABLE_DOCS` is explicitly `"true"`
+- Use `swagger-ui-express` to serve the OpenAPI specification
+- Load the OpenAPI spec from `docs/openapi.yaml` or `docs/openapi.json`
+- Place the conditional mount logic in the main app setup (`src/app.ts` or equivalent)
+- Do not bundle documentation dependencies in production if the route is disabled
+
 ## Environment Variables
 
 Define environment variables for:
@@ -209,6 +233,7 @@ Define environment variables for:
 - DynamoDB table names
 - S3 bucket names
 - SSM parameter paths
+- `ENABLE_DOCS` - Set to `"true"` to mount the `/docs` route for API documentation
 - Log levels
 
 ## Security Best Practices
@@ -232,6 +257,6 @@ Define environment variables for:
 
 - Add JSDoc comments for public APIs
 - Document complex business logic
-- Keep README.md updated
+- Keep README.md updated for developers and devops engineers
 - Document environment variables
 - Maintain OpenAPI spec in `docs/openapi.yaml`
