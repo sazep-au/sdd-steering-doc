@@ -8,7 +8,7 @@ This document defines the coding standards, architecture patterns, and best prac
 
 ## Project Overview
 
-- **Runtime**: Node.js >= 22.0.0
+- **Runtime**: Node.js >= 24.0.0
 - **Language**: TypeScript 5.3+
 - **Framework**: Express.js with AWS Lambda support (@codegenie/serverless-express)
 - **Testing**: Jest with ts-jest
