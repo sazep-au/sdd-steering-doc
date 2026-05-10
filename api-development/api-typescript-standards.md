@@ -129,7 +129,7 @@ describe('ServiceName', () => {
 ### Error Handling
 - Use `http-errors` package for HTTP errors
 - Return consistent error responses
-- Log errors with appropriate context using `@sazep/logger`
+- Log errors with appropriate context using `@sazep/sazep-logger`
 
 ### Response Format
 - Return consistent JSON responses
@@ -171,10 +171,61 @@ router.get('/resource/:id',
 
 ## Logging Standards
 
-- Use `@sazep/sazep-logger` package for all logging
-- Log levels: error, warn, info, debug
-- Include context in log messages
-- Never log sensitive data (passwords, tokens, PII)
+Use `@sazep/sazep-logger` for all structured JSON logging. This is the team's shared Powertools-based logger, standardized across services for consistent log shape, redaction, and correlation-id handling.
+
+### Logger Setup
+
+```typescript
+// src/common/logger.ts
+import { Logger } from '@sazep/sazep-logger';
+
+export const logger = new Logger({
+  serviceName: process.env.SERVICE_NAME ?? 'chimbuk-service-site',
+  logLevel: (process.env.LOG_LEVEL ?? 'INFO') as 'DEBUG' | 'INFO' | 'WARN' | 'ERROR',
+});
+```
+
+### Usage in Express Middleware
+
+Attach a per-request child logger so every log line in a request carries the same correlation context:
+
+```typescript
+// src/middlewares/logger-middleware.ts
+import { randomUUID } from 'node:crypto';
+import type { Request, Response, NextFunction } from 'express';
+import { logger } from '@/common/logger';
+
+declare module 'express-serve-static-core' {
+  interface Request {
+    logger: typeof logger;
+  }
+}
+
+export function loggerMiddleware(req: Request, _res: Response, next: NextFunction): void {
+  const correlationId = req.header('x-correlation-id') ?? randomUUID();
+  req.logger = logger.createChild();
+  req.logger.appendKeys({
+    correlationId,
+    method: req.method,
+    path: req.path,
+  });
+  next();
+}
+```
+
+Inside handlers and services, use `req.logger` (the request-scoped child) rather than the module-level `logger` so per-request context is automatically included.
+
+### Logging Rules
+
+- Import `logger` from `@/common/logger` everywhere — never instantiate ad-hoc loggers
+- Never import directly from `@aws-lambda-powertools/logger` in application code; go through `@sazep/sazep-logger`
+- Log levels: `error`, `warn`, `info`, `debug`
+- Include request context (correlation ID, user ID where relevant) on every log
+- Never log sensitive data (passwords, tokens, PII, full request/response bodies)
+- Use `logger.appendKeys()` for context scoped to the current request or operation
+- Use `logger.appendPersistentKeys()` for context that should survive across requests (rare in API code; more common in Lambda). Use the `persistentKeys` constructor option for values known at module load
+- Do **not** use `addPersistentLogAttributes()` or the `persistentLogAttributes` constructor option — both are deprecated in Powertools v2 and replaced by `appendPersistentKeys()` / `persistentKeys`
+- Log at `INFO` for normal operations, `WARN` for recoverable issues, `ERROR` for failures
 
 ## Build and Development
 

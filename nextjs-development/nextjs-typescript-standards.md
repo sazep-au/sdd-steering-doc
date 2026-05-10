@@ -871,10 +871,68 @@ export default nextConfig;
 
 ## Logging
 
-- Use structured logging (e.g., pino or winston) for server-side code
-- Never log sensitive data (tokens, passwords, PII)
-- Include request context (request ID, user ID) in logs
-- Use appropriate log levels: error, warn, info, debug
+Use `@sazep/sazep-logger` for all server-side structured logging (Server Components, Server Actions, Route Handlers, and middleware). This is the team's shared Powertools-based logger, standardized across services for consistent log shape, redaction, and correlation-id handling. Do not log from Client Components — their output goes to the browser console and should not be used for observability.
+
+### Logger Setup
+
+```typescript
+// src/lib/logger.ts
+import 'server-only';
+import { Logger } from '@sazep/sazep-logger';
+
+export const logger = new Logger({
+  serviceName: process.env.SERVICE_NAME ?? 'web-app',
+  logLevel: (process.env.LOG_LEVEL ?? 'INFO') as 'DEBUG' | 'INFO' | 'WARN' | 'ERROR',
+});
+```
+
+The `server-only` import guards against accidentally bundling the logger into a Client Component.
+
+### Per-Request Child Logger
+
+Create a child logger per request so correlation context doesn't leak across concurrent requests (Next.js server runs multiple requests in the same Node process):
+
+```typescript
+// src/lib/request-logger.ts
+import 'server-only';
+import { headers } from 'next/headers';
+import { randomUUID } from 'node:crypto';
+import { logger } from '@/lib/logger';
+
+export function getRequestLogger() {
+  const headersList = headers();
+  const correlationId = headersList.get('x-correlation-id') ?? randomUUID();
+
+  const child = logger.createChild();
+  child.appendKeys({ correlationId });
+  return child;
+}
+```
+
+Use it from Server Components, Server Actions, and Route Handlers:
+
+```typescript
+import { getRequestLogger } from '@/lib/request-logger';
+
+export async function GET(request: NextRequest) {
+  const log = getRequestLogger();
+  log.info('Fetching users', { path: request.nextUrl.pathname });
+  // ...
+}
+```
+
+### Logging Rules
+
+- Import `logger` / `getRequestLogger` from `@/lib/...` everywhere — never instantiate ad-hoc loggers
+- Never import directly from `@aws-lambda-powertools/logger` in application code; go through `@sazep/sazep-logger`
+- Never log from Client Components — browser console output is not observability
+- Log levels: `error`, `warn`, `info`, `debug`
+- Include request context (correlation ID, user ID where authenticated) on every log
+- Never log sensitive data (tokens, passwords, PII, full request/response bodies)
+- Use `logger.appendKeys()` for context scoped to the current request or operation
+- Use `logger.appendPersistentKeys()` for context that should survive across requests (rare in Next.js request-handling code). Use the `persistentKeys` constructor option for values known at module load
+- Do **not** use `addPersistentLogAttributes()` or the `persistentLogAttributes` constructor option — both are deprecated in Powertools v2 and replaced by `appendPersistentKeys()` / `persistentKeys`
+- Log at `INFO` for normal operations, `WARN` for recoverable issues, `ERROR` for failures
 
 ## Documentation
 
