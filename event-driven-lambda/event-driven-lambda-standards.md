@@ -573,6 +573,66 @@ export const logger = new Logger({
 });
 ```
 
+### Log Level Strategy — Cost-Aware
+
+The default log level is driven by environment to balance debuggability with log ingestion cost:
+
+| Environment | LOG_LEVEL | Rationale |
+|-------------|-----------|-----------|
+| Local / Dev | `DEBUG` | Aggressive debug logging — log event dispatch decisions, per-record processing entry/exit, intermediate state, idempotency checks, and outgoing SDK call summaries to maximize observability during development |
+| Staging | `DEBUG` | Mirror production event volume with full debug visibility for pre-release validation |
+| Production | `INFO` | **Minimize CloudWatch Logs ingestion cost.** Only log batch-level summaries, business-meaningful events, warnings, and errors. Never log at DEBUG in production unless temporarily enabled for incident investigation |
+
+**Cost-reduction rules for production:**
+- Keep log lines concise — avoid dumping large objects or full event payloads
+- Use structured keys (`logger.appendKeys`) rather than string interpolation
+- Log one summary per batch (record count, success/failure counts) instead of per-record INFO logs
+- Never log full event records — log identifiers (messageId, sequenceNumber, S3 key) only
+- Review and remove stale debug/info logs during code review — fewer log lines = lower cost
+- Use EMF metrics (Powertools Metrics) for counting and alerting rather than parsing logs
+
+> **Development default**: Set `LOG_LEVEL=DEBUG` in your local `.env` or Docker run command. The code defaults to `INFO` so production remains cost-efficient even if the variable is accidentally unset.
+
+### Debug Logging Guidelines (Development)
+
+In development (`LOG_LEVEL=DEBUG`), log aggressively to aid debugging of event-driven flows:
+
+```typescript
+// Example: aggressive debug logging in a processor
+export async function process(record: DynamoDBRecord): Promise<void> {
+  logger.debug('Processing stream record', {
+    sequenceNumber: record.dynamodb?.SequenceNumber,
+    eventName: record.eventName,
+    keys: record.dynamodb?.Keys,
+  });
+
+  const order = unmarshallOrder(record);
+  logger.debug('Unmarshalled order', { orderId: order.id, status: order.status });
+
+  const isNew = await idempotencyCheck(order.id);
+  logger.debug('Idempotency check result', { orderId: order.id, isNew });
+
+  if (!isNew) {
+    logger.debug('Skipping already-processed record', { orderId: order.id });
+    return;
+  }
+
+  await orderService.fulfill(order);
+  logger.debug('Order fulfillment complete', { orderId: order.id });
+}
+```
+
+What to log at DEBUG level:
+- Event dispatch routing decisions
+- Per-record processing entry with record identifiers
+- Unmarshalling/parsing results (structure, not full data)
+- Idempotency check outcomes
+- External SDK call parameters and response summaries
+- Branching decisions (skip, retry, DLQ routing)
+- Batch processing completion summaries
+
+These DEBUG lines are automatically suppressed in production (`LOG_LEVEL=INFO`) and incur zero CloudWatch cost.
+
 Logging rules:
 - Import `logger` from `@/common/logger` everywhere — never instantiate ad-hoc loggers
 - Never import directly from `@aws-lambda-powertools/logger` in application code; go through `@sazep/sazep-logger`
@@ -581,7 +641,8 @@ Logging rules:
 - Use `logger.appendKeys()` for context scoped to the current invocation (cleared by `injectLambdaContext({ clearState: true })`)
 - Use `logger.appendPersistentKeys()` for context that should survive across invocations (for example, a tenant ID resolved during cold start). Use `persistentKeys` in the constructor options for values known at module load
 - Do **not** use `addPersistentLogAttributes()` or the `persistentLogAttributes` constructor option — both are deprecated in Powertools v2 and replaced by `appendPersistentKeys()` / `persistentKeys`
-- Log at INFO for normal operations, WARN for recoverable issues, ERROR for failures
+- **Production (`INFO`)**: Log batch-level summaries, business-meaningful events, warnings, and errors only. Keep lines short and structured to minimize ingestion cost
+- **Development (`DEBUG`)**: Log aggressively — per-record processing, idempotency decisions, SDK call summaries, dispatch routing. This is cost-free since dev logs are local or short-retained
 
 ### Tracing
 
@@ -1110,6 +1171,17 @@ Per-function environment variables (resource ARNs, table names, queue URLs, feat
 - Use BuildKit cache mounts for `npm ci`
 - In CI, enable Docker layer caching (GitHub Actions `docker/build-push-action` with `cache-from`/`cache-to`, or ECR's pull-through cache)
 - Build the image once per commit in this repo; the infra repo deploys the same image digest across environments
+
+## Testing Standards
+
+### Property-Based Testing Policy
+
+- **STRICTLY PROHIBITED** — Do not implement property-based tests under any circumstances
+- Property-based tests are expensive to write, maintain, and run, with low return on investment for this project
+- Do not use libraries such as `fast-check`, `jsverify`, or any property/fuzz testing framework
+- If specs or task descriptions mention property-based tests (even marked optional with `*`), **skip them entirely**
+- Focus exclusively on example-based tests with specific inputs and expected outputs
+- Test with concrete event fixtures from `test/fixtures/events/` that represent real AWS event shapes
 
 ## NPM Scripts
 

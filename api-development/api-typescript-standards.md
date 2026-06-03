@@ -85,10 +85,11 @@ All strict TypeScript compiler options are enabled:
   - Functions: 80%
 
 ### Property-Based Testing Policy
-- **DO NOT** implement property-based tests unless explicitly requested by the user
-- Focus on example-based tests with specific inputs and expected outputs
-- Property-based testing adds complexity and is not part of the standard testing approach
-- If property-based tests are marked as optional in specs (with `*`), skip them by default
+- **STRICTLY PROHIBITED** — Do not implement property-based tests under any circumstances
+- Property-based tests are expensive to write, maintain, and run, with low return on investment for this project
+- Do not use libraries such as `fast-check`, `jsverify`, or any property/fuzz testing framework
+- If specs or task descriptions mention property-based tests (even marked optional with `*`), **skip them entirely**
+- Focus exclusively on example-based tests with specific inputs and expected outputs
 
 ### Test File Conventions
 - Co-locate tests with source: `feature.ts` → `feature.spec.ts`
@@ -173,6 +174,24 @@ router.get('/resource/:id',
 
 Use `@sazep/sazep-logger` for all structured JSON logging. This is the team's shared Powertools-based logger, standardized across services for consistent log shape, redaction, and correlation-id handling.
 
+### Log Level Strategy — Cost-Aware
+
+The default log level is driven by environment to balance debuggability with log ingestion cost:
+
+| Environment | LOG_LEVEL | Rationale |
+|-------------|-----------|-----------|
+| Local / Dev | `DEBUG` | Aggressive debug logging — log function entry/exit, input parameters, intermediate state, branching decisions, and outgoing request/response summaries to maximize observability during development |
+| Staging | `DEBUG` | Mirror production event volume with full debug visibility for pre-release validation |
+| Production | `INFO` | **Minimize CloudWatch Logs ingestion cost.** Only log business-meaningful events, operational milestones, warnings, and errors. Never log at DEBUG in production unless temporarily enabled for incident investigation |
+
+**Cost-reduction rules for production:**
+- Keep log lines concise — avoid dumping large objects; log only the fields necessary for diagnosis
+- Use structured keys (`logger.appendKeys`) rather than interpolating values into message strings (enables cheaper CloudWatch Insights queries without full-text scan)
+- Prefer a single summary log per operation over per-step logs where possible
+- Never log full request/response bodies — log content-length, status, and key identifiers only
+- Review and remove stale debug/info logs during code review — fewer log lines = lower cost
+- Use CloudWatch Logs metric filters or EMF metrics instead of parsing logs for alerting
+
 ### Logger Setup
 
 ```typescript
@@ -184,6 +203,38 @@ export const logger = new Logger({
   logLevel: (process.env.LOG_LEVEL ?? 'INFO') as 'DEBUG' | 'INFO' | 'WARN' | 'ERROR',
 });
 ```
+
+> **Development default**: Set `LOG_LEVEL=DEBUG` in `.env.local` / development environment variables. The code defaults to `INFO` so production remains cost-efficient even if the variable is accidentally unset.
+
+### Debug Logging Guidelines (Development)
+
+In development (`LOG_LEVEL=DEBUG`), log aggressively to aid debugging:
+
+```typescript
+// Example: aggressive debug logging in a service method
+async function getProfile(siteId: string, profileId: string): Promise<Profile | null> {
+  logger.debug('getProfile called', { siteId, profileId });
+
+  const result = await profileDAL.getProfile(siteId, profileId);
+
+  logger.debug('getProfile DAL response', {
+    siteId,
+    profileId,
+    found: result !== null,
+  });
+
+  return result;
+}
+```
+
+What to log at DEBUG level:
+- Function entry with parameters (sanitized — no PII/secrets)
+- Outgoing service/database call parameters and response summaries
+- Branching decisions (`logger.debug('Cache hit, skipping fetch', { key })`)
+- Loop iterations for batch processing (with item identifiers, not full payloads)
+- Intermediate computation results relevant for tracing logic flow
+
+These DEBUG lines are automatically suppressed in production (`LOG_LEVEL=INFO`) and incur zero CloudWatch cost.
 
 ### Usage in Express Middleware
 
@@ -225,7 +276,8 @@ Inside handlers and services, use `req.logger` (the request-scoped child) rather
 - Use `logger.appendKeys()` for context scoped to the current request or operation
 - Use `logger.appendPersistentKeys()` for context that should survive across requests (rare in API code; more common in Lambda). Use the `persistentKeys` constructor option for values known at module load
 - Do **not** use `addPersistentLogAttributes()` or the `persistentLogAttributes` constructor option — both are deprecated in Powertools v2 and replaced by `appendPersistentKeys()` / `persistentKeys`
-- Log at `INFO` for normal operations, `WARN` for recoverable issues, `ERROR` for failures
+- **Production (`INFO`)**: Log business-meaningful milestones, warnings, and errors only. Keep lines short and structured to minimize ingestion cost
+- **Development (`DEBUG`)**: Log aggressively — function entry/exit, parameters, decision branches, external call summaries. This is cost-free since dev logs are either local or short-retained
 
 ## Build and Development
 

@@ -873,6 +873,24 @@ export default nextConfig;
 
 Use `@sazep/sazep-logger` for all server-side structured logging (Server Components, Server Actions, Route Handlers, and middleware). This is the team's shared Powertools-based logger, standardized across services for consistent log shape, redaction, and correlation-id handling. Do not log from Client Components — their output goes to the browser console and should not be used for observability.
 
+### Log Level Strategy — Cost-Aware
+
+The default log level is driven by environment to balance debuggability with log ingestion cost:
+
+| Environment | LOG_LEVEL | Rationale |
+|-------------|-----------|-----------|
+| Local / Dev | `DEBUG` | Aggressive debug logging — log function entry/exit, input parameters, intermediate state, branching decisions, and outgoing request/response summaries to maximize observability during development |
+| Staging | `DEBUG` | Mirror production traffic patterns with full debug visibility for pre-release validation |
+| Production | `INFO` | **Minimize CloudWatch Logs ingestion cost.** Only log business-meaningful events, operational milestones, warnings, and errors. Never log at DEBUG in production unless temporarily enabled for incident investigation |
+
+**Cost-reduction rules for production:**
+- Keep log lines concise — avoid dumping large objects; log only the fields necessary for diagnosis
+- Use structured keys (`logger.appendKeys`) rather than interpolating values into message strings (enables cheaper CloudWatch Insights queries without full-text scan)
+- Prefer a single summary log per operation over per-step logs where possible
+- Never log full request/response bodies — log content-length, status, and key identifiers only
+- Review and remove stale debug/info logs during code review — fewer log lines = lower cost
+- Use CloudWatch Logs metric filters or EMF metrics instead of parsing logs for alerting
+
 ### Logger Setup
 
 ```typescript
@@ -886,7 +904,50 @@ export const logger = new Logger({
 });
 ```
 
+> **Development default**: Set `LOG_LEVEL=DEBUG` in `.env.local`. The code defaults to `INFO` so production remains cost-efficient even if the variable is accidentally unset.
+
 The `server-only` import guards against accidentally bundling the logger into a Client Component.
+
+### Debug Logging Guidelines (Development)
+
+In development (`LOG_LEVEL=DEBUG`), log aggressively in Server Components, Server Actions, and Route Handlers:
+
+```typescript
+// Example: aggressive debug logging in a Server Action
+'use server';
+
+import { getRequestLogger } from '@/lib/request-logger';
+
+export async function createUser(formData: FormData) {
+  const log = getRequestLogger();
+  const rawData = { name: formData.get('name'), email: formData.get('email') };
+
+  log.debug('createUser action invoked', { rawData });
+
+  const validated = createUserSchema.safeParse(rawData);
+  log.debug('createUser validation result', { success: validated.success });
+
+  if (!validated.success) {
+    log.debug('createUser validation failed', { errors: validated.error.flatten().fieldErrors });
+    return { error: validated.error.flatten().fieldErrors };
+  }
+
+  const user = await db.user.create({ data: validated.data });
+  log.debug('createUser DB write complete', { userId: user.id });
+
+  revalidatePath('/users');
+  redirect('/users');
+}
+```
+
+What to log at DEBUG level:
+- Server Action / Route Handler entry with sanitized parameters
+- Validation results (success/failure, field errors)
+- Database query parameters and result summaries (row count, IDs — not full rows)
+- Cache decisions (hit/miss, revalidation triggers)
+- Branching decisions and early returns
+
+These DEBUG lines are automatically suppressed in production (`LOG_LEVEL=INFO`) and incur zero CloudWatch cost.
 
 ### Per-Request Child Logger
 
@@ -932,7 +993,8 @@ export async function GET(request: NextRequest) {
 - Use `logger.appendKeys()` for context scoped to the current request or operation
 - Use `logger.appendPersistentKeys()` for context that should survive across requests (rare in Next.js request-handling code). Use the `persistentKeys` constructor option for values known at module load
 - Do **not** use `addPersistentLogAttributes()` or the `persistentLogAttributes` constructor option — both are deprecated in Powertools v2 and replaced by `appendPersistentKeys()` / `persistentKeys`
-- Log at `INFO` for normal operations, `WARN` for recoverable issues, `ERROR` for failures
+- **Production (`INFO`)**: Log business-meaningful milestones, warnings, and errors only. Keep lines short and structured to minimize ingestion cost
+- **Development (`DEBUG`)**: Log aggressively — function entry/exit, parameters, decision branches, external call summaries. This is cost-free since dev logs are either local or short-retained
 
 ## Documentation
 

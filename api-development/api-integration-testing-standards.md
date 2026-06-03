@@ -34,12 +34,12 @@ Integration tests validate the interaction between multiple layers of the applic
 
 ### Property-Based Testing Policy
 
-**DO NOT** implement property-based tests unless explicitly requested by the user:
-- Property-based testing adds unnecessary complexity
-- Example-based tests with specific inputs/outputs are preferred
-- Focus on concrete test cases that are easy to understand and debug
-- If specs include optional property-based tests (marked with `*`), skip them
-- Only implement property-based tests when the user specifically asks for them
+**STRICTLY PROHIBITED** — Do not implement property-based tests under any circumstances:
+- Property-based tests are expensive to write, maintain, and run, with low return on investment for this project
+- Do not use libraries such as `fast-check`, `jsverify`, or any property/fuzz testing framework
+- If specs or task descriptions mention property-based tests (even marked optional with `*`), **skip them entirely**
+- Focus exclusively on example-based tests with specific inputs and expected outputs
+- Only implement deterministic, reproducible tests with clearly defined assertions
 
 ## DynamoDB Local Setup
 

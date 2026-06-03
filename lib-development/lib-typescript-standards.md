@@ -517,6 +517,58 @@ Libraries should **not** include their own logger by default. Instead:
 - Never write to `console.*` in production code
 - Provide a debug mode that consumers can opt into
 
+### Log Level Strategy — Cost-Aware
+
+When consumers inject a logger, the library should respect the log level set by the consuming application:
+
+| Consumer Environment | Expected LOG_LEVEL | Library Behavior |
+|---------------------|-------------------|-----------------|
+| Local / Dev | `DEBUG` | Log aggressively — function entry/exit, input parameters, intermediate state, cache hits/misses, retry decisions, timing info |
+| Staging | `DEBUG` | Same as dev — full debug visibility for pre-release validation |
+| Production | `INFO` | **Minimize log volume to reduce CloudWatch Logs ingestion cost.** Only log significant operational events (initialization, errors, retries exhausted). Suppress all debug-level output |
+
+**Cost-reduction guidance for library consumers:**
+- Libraries should use `debug` level for internal tracing — this is automatically suppressed at `INFO`
+- Keep log messages concise — avoid serializing large objects
+- Use structured keys rather than string interpolation
+- Emit a single summary log per high-level operation rather than per-step logs
+- Document which log levels the library emits so consumers can tune ingestion budgets
+
+### Debug Logging Guidelines (Development)
+
+When the consumer provides a logger at DEBUG level, libraries should log:
+- Public method entry with parameters (sanitized — no PII/secrets)
+- Internal decision points (retry attempt, cache hit/miss, fallback triggered)
+- Outgoing call parameters and response summaries
+- Timing information for performance-sensitive operations
+- Error context before re-throwing
+
+```typescript
+export class Client {
+  private readonly logger: LibraryLogger;
+
+  constructor(options: ClientOptions) {
+    this.logger = options.logger ?? noopLogger;
+  }
+
+  async get(path: string): Promise<unknown> {
+    this.logger.debug('Client.get called', { path, baseUrl: this.baseUrl });
+    const start = Date.now();
+
+    const result = await this.fetch(path);
+
+    this.logger.debug('Client.get completed', {
+      path,
+      durationMs: Date.now() - start,
+      status: result.status,
+    });
+    return result.data;
+  }
+}
+```
+
+These debug lines are automatically suppressed in production (consumer sets `INFO`) and incur zero cost.
+
 ```typescript
 export interface LibraryLogger {
   debug(message: string, context?: Record<string, unknown>): void;

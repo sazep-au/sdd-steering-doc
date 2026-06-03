@@ -47,10 +47,11 @@ Libraries require a higher testing bar than application code because bugs affect
 
 ### Property-Based Testing Policy
 
-- **DO NOT** implement property-based tests unless explicitly requested by the user
-- Focus on example-based tests with specific inputs and expected outputs
-- Property-based testing adds complexity and is not part of the standard testing approach
-- If property-based tests are marked as optional in specs (with `*`), skip them by default
+- **STRICTLY PROHIBITED** — Do not implement property-based tests under any circumstances
+- Property-based tests are expensive to write, maintain, and run, with low return on investment for this project
+- Do not use libraries such as `fast-check`, `jsverify`, or any property/fuzz testing framework
+- If specs or task descriptions mention property-based tests (even marked optional with `*`), **skip them entirely**
+- Focus exclusively on example-based tests with specific inputs and expected outputs
 
 ## Project Structure
 
